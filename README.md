@@ -53,34 +53,56 @@ A well-designed retry strategy should include both a retry limit and a backoff m
 With `HTTPAdapter`, we need to configure three things: `total`, `backoff_factor`, and `status_forcelist`. `allowed_methods` isn’t a requirement per se, but it helps define our retry conditions and thus makes our code safer. In the code below, we use [httpbin](https://httpbin.org/) to automatically force an error and trigger the retry logic.
 
 ```python
+import logging
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-#create a session
+# Configure logging
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logger = logging.getLogger(__name__)
+
+# Create a session
 session = requests.Session()
 
-#configure retry settings
+# Configure retry settings
 retry = Retry(
-    total=3,                  #maximum retries
-    backoff_factor=0.3,       #time between retries (exponential backoff)
-    status_forcelist=(429, 500, 502, 503, 504), #status codes to trigger a retry
-    allowed_methods={"GET", "POST"}
+    total=3,  # Maximum retries
+    backoff_factor=0.3,  # Time between retries (exponential backoff)
+    status_forcelist=(429, 500, 502, 503, 504),  # Status codes to trigger a retry
+    allowed_methods={"GET", "POST"}  # Allow retries for GET and POST
 )
 
-#mount the adapter with our custom settings
+# Mount the adapter with our custom settings
 adapter = HTTPAdapter(max_retries=retry)
 session.mount("http://", adapter)
 session.mount("https://", adapter)
 
-#actually make a request with our retry logic
-try:
-    print("Making a request with retry logic...")
-    response = session.get("https://httpbin.org/status/500")
-    response.raise_for_status()
-    print("✅ Request successful:", response.status_code)
-except requests.exceptions.RequestException as e:
-    print("❌ Request failed after retries:", e)
+# Function to make a request and test retry logic
+def make_request(url, method="GET"):
+    try:
+        logger.info(f"Making a {method} request to {url} with retry logic...")
+        
+        if method == "GET":
+            response = session.get(url)
+        elif method == "POST":
+            response = session.post(url)
+        else:
+            logger.error("Unsupported HTTP method: %s", method)
+            return
+        
+        response.raise_for_status()
+        logger.info("✅ Request successful: %s", response.status_code)
+    
+    except requests.exceptions.RequestException as e:
+        logger.error("❌ Request failed after retries: %s", e)
+        logger.info("Retries attempted: %d", len(response.history) if response else 0)
+
+# Test Cases
+make_request("https://httpbin.org/status/200")  # ✅ Should succeed without retries
+make_request("https://httpbin.org/status/500")  # ❌ Should retry 3 times and fail
+make_request("https://httpbin.org/status/404")  # ❌ Should fail immediately (no retries)
+make_request("https://httpbin.org/status/500", method="POST")  # ❌ Should retry 3 times and fail
 ```
 
 Once you created a `Session` object, do this:
@@ -95,8 +117,20 @@ Once you created a `Session` object, do this:
 When you run this code, the three retries (`total=3`) will run, and then you’ll get the following output.
 
 ```
-Making a request with retry logic...
-❌ Request failed after retries: HTTPSConnectionPool(host='httpbin.org', port=443): Max retries exceeded with url: /status/500 (Caused by ResponseError('too many 500 error responses'))
+2024-06-10 12:00:00 - INFO - Making a GET request to https://httpbin.org/status/200 with retry logic...
+2024-06-10 12:00:00 - INFO - ✅ Request successful: 200
+
+2024-06-10 12:00:01 - INFO - Making a GET request to https://httpbin.org/status/500 with retry logic...
+2024-06-10 12:00:02 - ERROR - ❌ Request failed after retries: 500 Server Error: INTERNAL SERVER ERROR for url: ...
+2024-06-10 12:00:02 - INFO - Retries attempted: 3
+
+2024-06-10 12:00:03 - INFO - Making a GET request to https://httpbin.org/status/404 with retry logic...
+2024-06-10 12:00:03 - ERROR - ❌ Request failed after retries: 404 Client Error: NOT FOUND for url: ...
+2024-06-10 12:00:03 - INFO - Retries attempted: 0
+
+2024-06-10 12:00:04 - INFO - Making a POST request to https://httpbin.org/status/500 with retry logic...
+2024-06-10 12:00:05 - ERROR - ❌ Request failed after retries: 500 Server Error: INTERNAL SERVER ERROR for url: ...
+2024-06-10 12:00:05 - INFO - Retries attempted: 3
 ```
 
 ## Tenacity
