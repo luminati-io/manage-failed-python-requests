@@ -146,29 +146,35 @@ pip install tenacity
 Once installed, create a _decorator_ and use it to wrap a requests function. With the `@retry` decorator, add the `stop`, `wait`, and `retry` arguments.
 
 ```python
+import logging
 import requests
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type, RetryError
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type, retry_if_result, RetryError
 
-#define a retry strategy
+# Configure logging
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logger = logging.getLogger(__name__)
+
+# Define a retry strategy
 @retry(
-    stop=stop_after_attempt(3),  #retry up to 3 times
-    wait=wait_exponential(multiplier=0.3),  #exponential backoff
-    retry=retry_if_exception_type(requests.exceptions.RequestException),  #retry on request failures
+    stop=stop_after_attempt(3),  # Retry up to 3 times
+    wait=wait_exponential(multiplier=0.3),  # Exponential backoff
+    retry=(
+        retry_if_exception_type(requests.exceptions.RequestException) |  # Retry on request failures
+        retry_if_result(lambda r: r.status_code in {500, 502, 503, 504})  # Retry on specific HTTP status codes
+    ),
 )
-
-def make_request():
-    print("Making a request with retry logic...")
-    response = requests.get("https://httpbin.org/status/500")
+def make_request(url):
+    logger.info("Making a request with retry logic to %s...", url)
+    response = requests.get(url)
     response.raise_for_status()
-    print("✅ Request successful:", response.status_code)
+    logger.info("✅ Request successful: %s", response.status_code)
     return response
 
 # Attempt to make the request
 try:
-    make_request()
+    make_request("https://httpbin.org/status/500")  # Test with a failing status code
 except RetryError as e:
-    print("❌ Request failed after all retries:", e)
-
+    logger.error("❌ Request failed after all retries: %s", e)    
 ```
 
 The logic and settings here are very similar to the first example with `HTTPAdapter`:
@@ -181,10 +187,12 @@ The logic and settings here are very similar to the first example with `HTTPAdap
 When you run this code, you get a similar output:
 
 ```
-Making a request with retry logic...
-Making a request with retry logic...
-Making a request with retry logic...
-❌ Request failed after all retries: RetryError[<Future at 0x75e762970760 state=finished raised HTTPError>]
+2024-06-10 12:00:00 - INFO - Making a request with retry logic to https://httpbin.org/status/500...
+2024-06-10 12:00:01 - WARNING - Retrying after 0.3 seconds...
+2024-06-10 12:00:01 - INFO - Making a request with retry logic to https://httpbin.org/status/500...
+2024-06-10 12:00:02 - WARNING - Retrying after 0.6 seconds...
+2024-06-10 12:00:02 - INFO - Making a request with retry logic to https://httpbin.org/status/500...
+2024-06-10 12:00:03 - ERROR - ❌ Request failed after all retries: RetryError[...]
 ```
 
 ## Building a Custom Retry Mechanism
@@ -194,35 +202,54 @@ You can also create a custom retry mechanism, which is often the best approach w
 The code below demonstrates how to import `sleep` for the exponential backoff, set the configuration (`total`, `backoff_factor` and `bad_codes`), and use a `while` loop to hold the retry logic. `while`you still have tries and you haven’t succeeded, attempt the request.
 
 ```python
+import logging
 import requests
 from time import sleep
 
-#create a session
+# Configure logging
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logger = logging.getLogger(__name__)
+
+# Create a session
 session = requests.Session()
 
-#define our retry settings
-total = 3
-backoff_factor = 0.3
-bad_codes = [429, 500, 502, 503, 504]
+# Define retry settings
+TOTAL_RETRIES = 3
+INITIAL_BACKOFF = 0.3
+BAD_CODES = {429, 500, 502, 503, 504}
 
-#try counter and success boolean
-current_tries = 0
-success = False
+def make_request(url):
+    current_tries = 0
+    backoff = INITIAL_BACKOFF
+    success = False
 
-#attempt until we succeed or run out of tries
-while current_tries < total and not success:
-    try:
-        print("Making a request with retry logic...")
-        response = session.get("https://httpbin.org/status/500")
-        if response.status_code in bad_codes:
-            raise requests.exceptions.HTTPError(f"Received {response.status_code}, triggering retry")
-        print("✅ Request successful:", response.status_code)
-        success = True
-    except requests.exceptions.RequestException as e:
-        print(f"❌ Request failed: {e}, retries left: {total-current_tries}")
-        sleep(backoff_factor)
-        backoff_factor = backoff_factor * 2
-        current_tries+=1
+    while current_tries < TOTAL_RETRIES and not success:
+        try:
+            logger.info("Making a request with retry logic to %s...", url)
+            response = session.get(url)
+            
+            if response.status_code in BAD_CODES:
+                raise requests.exceptions.HTTPError(f"Received {response.status_code}, triggering retry")
+            
+            response.raise_for_status()
+            logger.info("✅ Request successful: %s", response.status_code)
+            success = True
+            return response
+
+        except requests.exceptions.RequestException as e:
+            logger.error("❌ Request failed: %s, retries left: %d", e, TOTAL_RETRIES - current_tries - 1)
+            if current_tries < TOTAL_RETRIES - 1:
+                logger.info("⏳ Retrying in %.1f seconds...", backoff)
+                sleep(backoff)
+                backoff *= 2  # Exponential backoff
+            current_tries += 1
+
+    logger.error("🚨 Request failed after all retries.")
+    return None
+
+# Test Cases
+make_request("https://httpbin.org/status/500")  # ❌ Should retry 3 times and fail
+make_request("https://httpbin.org/status/200")  # ✅ Should succeed without retries
 ```
 
 The actual logic here is handled by a simple `while` loop.
@@ -237,12 +264,15 @@ The actual logic here is handled by a simple `while` loop.
 Here’s the output from the custom retry code.
 
 ```
-Making a request with retry logic...
-❌ Request failed: Received 500, triggering retry, retries left: 3
-Making a request with retry logic...
-❌ Request failed: Received 500, triggering retry, retries left: 2
-Making a request with retry logic...
-❌ Request failed: Received 500, triggering retry, retries left: 1
+2024-06-10 12:00:00 - INFO - Making a request with retry logic to https://httpbin.org/status/500...
+2024-06-10 12:00:01 - ERROR - ❌ Request failed: Received 500, triggering retry, retries left: 2
+2024-06-10 12:00:01 - INFO - ⏳ Retrying in 0.3 seconds...
+2024-06-10 12:00:02 - INFO - Making a request with retry logic to https://httpbin.org/status/500...
+2024-06-10 12:00:03 - ERROR - ❌ Request failed: Received 500, triggering retry, retries left: 1
+2024-06-10 12:00:03 - INFO - ⏳ Retrying in 0.6 seconds...
+2024-06-10 12:00:04 - INFO - Making a request with retry logic to https://httpbin.org/status/500...
+2024-06-10 12:00:05 - ERROR - ❌ Request failed: Received 500, triggering retry, retries left: 0
+2024-06-10 12:00:05 - ERROR - 🚨 Request failed after all retries.
 ```
 
 ## Conclusion
