@@ -28,16 +28,16 @@ Here is a list of common error codes (taken from Mozilla’s [official document
 | **Status Code** | **Meaning** | **Description** |
 | --- | --- | --- |
 | 400 | Bad Request | Check your request format |
-| 401 | Unauthorized | Check your API key |
-| 403 | Forbidden | You cannot access this data |
+| [401](https://brightdata.com/faqs/proxy-errors/error-401-how-to-avoid) | Unauthorized | Check your API key |
+| [403](https://brightdata.com/faqs/proxy-errors/403-status-error-how-to-avoid) | Forbidden | You cannot access this data |
 | 404 | Not Found | Site/Endpoint doesn’t exist |
-| 408 | Request Timeout | Request timed out, try again |
-| 429 | Too Many Requests | Slow down your requests |
+| [408](https://brightdata.com/faqs/proxy-errors/error-408-how-to-avoid) | Request Timeout | Request timed out, try again |
+| [429](https://brightdata.com/faqs/proxy-errors/429-error-how-to-avoid) | Too Many Requests | Slow down your requests |
 | 500 | Internal Server Error | Generic server error, retry request |
 | 501 | Not Implemented | Server doesn’t support this yet |
-| 502 | Bad Gateway | Failed response from an upstream server |
-| 503 | Service Unavailable | Server is temporarily down, retry later |
-| 504 | Gateway Timeout | Timed out waiting for an upstream server |
+| [502](https://brightdata.com/faqs/proxy-errors/502-error-how-to-avoid) | Bad Gateway | Failed response from an upstream server |
+| [503](https://brightdata.com/faqs/proxy-errors/503-error-how-to-avoid) | Service Unavailable | Server is temporarily down, retry later |
+| [504](https://brightdata.com/faqs/proxy-errors/504-error-how-to-avoid) | Gateway Timeout | Timed out waiting for an upstream server |
 
 ## Retry Strategies
 
